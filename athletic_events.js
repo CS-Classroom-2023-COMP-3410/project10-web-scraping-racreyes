@@ -1,39 +1,54 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs');
-
-const URL = 'https://denverpioneers.com'; // Change to actual scoreboard URL
+const path = require('path');
 
 async function scrapeAthleticEvents() {
-    try {
-        const { data } = await axios.get(URL);
-        const $ = cheerio.load(data);
+  try {
+    const url = 'https://denverpioneers.com';
+    const response = await axios.get(url);
+    const $ = cheerio.load(response.data);
 
-        const events = [];
+    //find the script that dynamically loads all the HTML conetnt for the carosel 
+    const scriptContent = $('section[aria-labelledby="h2_scoreboard"] script').first().html(); 
 
-        $('.c-scoreboard__item').each((index, element) => {
-            const eventDate = $(element).find('.c-scoreboard__date').text().trim();
-            const duTeam = $(element).find('.c-scoreboard__sport').text().trim();
-            const opponent = $(element).find('.c-scoreboard_team-name').text().trim();
+    if (scriptContent) {
+      const jsonStringMatch = scriptContent.match(/var obj = (.*?);\s*if/); // make it into json compatible data
 
-            if (eventDate && duTeam && opponent) {
-                events.push({ date: eventDate, duTeam, opponent });
-            }
-        });
+      if (jsonStringMatch && jsonStringMatch[1]) {
+        const jsonString = jsonStringMatch[1];
 
-        if (events.length === 0) {
-            console.log("No upcoming events found.");
-            return;
+        let jsonObject;
+        try {
+          jsonObject = JSON.parse(jsonString);
+        } catch (parseError) {
+          console.error('JSON Parse Error:', parseError);
+          return;
         }
 
-        // Save output to JSON file
-        const outputFilePath = 'results/athletic_events.json';
-        fs.writeFileSync(outputFilePath, JSON.stringify({ events }, null, 2));
+        const events = jsonObject.data.map(event => ({
+          duTeam: jsonObject.extra.school_name,
+          opponent: event.opponent.title,
+          date: event.date,
+        }));
 
-        console.log(`Scraped ${events.length} events and saved to ${outputFilePath}`);
-    } catch (error) {
-        console.error("Error fetching DU athletic events:", error.message);
+        const output = {
+          events: events
+        };
+
+        const outputPath = path.join(__dirname, 'results', 'athletic_events.json');
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+
+      } else {
+        console.log('No JSON data found within the script tag.');
+      }
+    } else {
+      console.log('No script found within the section[aria-labelledby="h2_scoreboard"]');
     }
+  } catch (error) {
+    console.error('Error:', error);
+  }
 }
 
 // Run the scraper
